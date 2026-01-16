@@ -1,9 +1,11 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://plagiarism-checker-ebh0.onrender.com/';
+// Use environment variable for flexibility between dev and prod
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true, // Important for CORS with credentials
   headers: {
     'Content-Type': 'application/json',
   },
@@ -52,7 +54,7 @@ export const uploadFiles = (formData) => {
 };
 export const checkGoogleOnly = (data) => api.post('/plagiarism/check-google-only', data);
 
-// File History Check API - NEW
+// File History Check API
 export const checkFileHistory = (formData) => {
   return api.post('/files/check-file-history', formData, {
     headers: {
@@ -78,3 +80,4 @@ export const toggleAdminStatus = (userId) => api.patch(`/admin/users/${userId}/t
 export const getStats = () => api.get('/admin/stats');
 
 export default api;
+export { API_BASE_URL };
