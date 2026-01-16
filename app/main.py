@@ -13,20 +13,21 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Get allowed origins from environment variable
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# Define allowed origins explicitly
 allowed_origins = [
     "http://localhost:3000",
-    FRONTEND_URL
+    "https://plagiarism-checker-frontend-z4uj.onrender.com",
 ]
 
-# CORS Configuration
+# CORS Configuration - MUST be added BEFORE routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 @app.on_event("startup")
