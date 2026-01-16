@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: plagiarism-checker-frontend
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+```
+
+## Solution 5: Downgrade Node.js version
+
+Create a `.node-version` file:
+```
+20.11.0
+```
+
+Or `.nvmrc`:
+```
+20
