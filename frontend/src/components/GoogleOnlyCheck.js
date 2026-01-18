@@ -1,11 +1,46 @@
 import React, { useState } from 'react';
+import { checkGoogleOnly, searchInHistory } from '../api/api';
 import GoogleSources from './GoogleSources';
+import HistoryMatches from './HistoryMatches';
 import './GoogleOnlyCheck.css';
 
 function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [checkHistory, setCheckHistory] = useState(true);
+  const [historyMatches, setHistoryMatches] = useState(null);
+  const [showHistoryMatches, setShowHistoryMatches] = useState(false);
+  const [checkingHistory, setCheckingHistory] = useState(false);
+
+  // Check text against history
+  const checkTextAgainstHistory = async (textToCheck) => {
+    if (!checkHistory || !textToCheck || textToCheck.trim().length < 50) {
+      return null;
+    }
+
+    console.log('🔍 Checking text against history...');
+    setCheckingHistory(true);
+
+    try {
+      const response = await searchInHistory({
+        text: textToCheck,
+        min_similarity: 50.0
+      });
+
+      if (response.data.matches_found > 0) {
+        console.log(`✅ Found ${response.data.matches_found} matches`);
+        return response.data;
+      }
+      console.log('✅ No matches found');
+      return null;
+    } catch (error) {
+      console.error('❌ Error checking history:', error);
+      return null;
+    } finally {
+      setCheckingHistory(false);
+    }
+  };
 
   const handleCheck = async () => {
     if (!text.trim()) {
@@ -15,9 +50,30 @@ function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
 
     setLoading(true);
     setResult(null);
+    setHistoryMatches(null);
+    setShowHistoryMatches(false);
 
     try {
-      const { checkGoogleOnly } = require('../api/api');
+      // STEP 1: Check history first
+      if (checkHistory) {
+        console.log('=== CHECKING HISTORY ===');
+        const matchesData = await checkTextAgainstHistory(text);
+        
+        if (matchesData) {
+          setHistoryMatches(matchesData);
+          alert(
+            `⚠️ TEXT FOUND IN YOUR HISTORY!\n\n` +
+            `📝 Matches Found: ${matchesData.matches_found}\n` +
+            `🎯 Highest Similarity: ${matchesData.highest_similarity}%\n\n` +
+            `This text has been checked before.\n` +
+            `Click OK to continue and view Google results.`
+          );
+          setShowHistoryMatches(true);
+        }
+      }
+
+      // STEP 2: Check Google similarity
+      console.log('=== CHECKING GOOGLE ===');
       const response = await checkGoogleOnly({ text });
       setResult(response.data);
       if (onResult) {
@@ -31,12 +87,15 @@ function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
       }
     } finally {
       setLoading(false);
+      setCheckingHistory(false);
     }
   };
 
   const handleReset = () => {
     setResult(null);
     setText('');
+    setHistoryMatches(null);
+    setShowHistoryMatches(false);
   };
 
   return (
@@ -60,19 +119,43 @@ function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
             className="google-only-textarea"
           />
           
+          <div className="text-info">
+            {text.length} characters | {text.split(/\s+/).filter(w => w).length} words
+          </div>
+
+          {/* History Check Option */}
+          <div className="google-check-options">
+            <label>
+              <input
+                type="checkbox"
+                checked={checkHistory}
+                onChange={(e) => setCheckHistory(e.target.checked)}
+              />
+              <span>Check Against Past History First</span>
+            </label>
+          </div>
+          
           <div className="google-only-info">
             <p>ℹ️ This will search Google for similar content and show you matching sources with highlighted text.</p>
+            {checkHistory && (
+              <p className="history-note">✅ Your text will also be checked against past submissions.</p>
+            )}
           </div>
 
           <button 
             onClick={handleCheck} 
             className="btn-primary btn-google-check" 
-            disabled={loading || !text.trim()}
+            disabled={loading || checkingHistory || !text.trim()}
           >
-            {loading ? (
+            {checkingHistory ? (
               <>
                 <span className="spinner-small"></span>
-                Searching Google...
+                🔍 Checking History...
+              </>
+            ) : loading ? (
+              <>
+                <span className="spinner-small"></span>
+                🌐 Searching Google...
               </>
             ) : (
               <>🔍 Check on Google</>
@@ -87,6 +170,32 @@ function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
               Check Another Text
             </button>
           </div>
+
+          {/* Show History Match Status if found */}
+          {historyMatches && (
+            <div className="history-status-summary">
+              <h3>📋 History Check Results:</h3>
+              <div className="history-status-cards">
+                <div 
+                  className="history-status-card google-text-status"
+                  data-severity={
+                    historyMatches.highest_similarity >= 80 ? 'high' :
+                    historyMatches.highest_similarity >= 50 ? 'medium' : 'low'
+                  }
+                >
+                  <h4>📝 Checked Text</h4>
+                  <p className="match-count">{historyMatches.matches_found} Match(es) Found</p>
+                  <p className="highest-sim">Highest: {historyMatches.highest_similarity}%</p>
+                  <button 
+                    onClick={() => setShowHistoryMatches(true)} 
+                    className="btn-view-matches"
+                  >
+                    View History Matches
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="result-card">
             <div className="result-item">
@@ -138,6 +247,16 @@ function GoogleOnlyCheck({ onResult, getSimilarityColor }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* History Matches Modal */}
+      {showHistoryMatches && historyMatches && (
+        <HistoryMatches
+          matches={historyMatches}
+          onClose={() => setShowHistoryMatches(false)}
+          title="📝 Google Check - History Matches"
+          currentText={text}
+        />
       )}
     </div>
   );

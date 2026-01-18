@@ -1,23 +1,21 @@
 import React, { useState } from 'react';
 import { uploadFiles, checkFileHistory } from '../api/api';
 import HistoryMatches from './HistoryMatches';
-import GoogleSimilarityViewer from './GoogleSimilarityViewer';
+import GoogleSources from './GoogleSources';
+import AIDetectionResult from './AIDetectionResult';
 import './FileUpload.css';
 
-// Helper function to extract text from file
 const extractTextFromFile = async (file) => {
   if (file.type === 'text/plain') {
     return await file.text();
   } else if (file.type === 'application/pdf' || 
              file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    // For PDF and DOCX, we'll indicate that full comparison isn't available in frontend
-    // The backend handles the actual text extraction
     return `[${file.name} - Binary file content. Similarity comparison handled by server.]`;
   }
   return '';
 };
 
-function FileUpload({ onResult }) {
+function FileUpload({ onResult, getSimilarityColor }) {
   const [file1, setFile1] = useState(null);
   const [file2, setFile2] = useState(null);
   const [checkGoogle, setCheckGoogle] = useState(false);
@@ -33,6 +31,7 @@ function FileUpload({ onResult }) {
   const [checkingHistory, setCheckingHistory] = useState(false);
   const [extractedText1, setExtractedText1] = useState('');
   const [extractedText2, setExtractedText2] = useState('');
+  const [result, setResult] = useState(null);
 
   const handleFile1Change = (e) => {
     const file = e.target.files[0];
@@ -96,7 +95,6 @@ function FileUpload({ onResult }) {
     }
   };
 
-  // Check file against history with detailed response
   const checkFileAgainstHistory = async (file, fileNumber) => {
     if (!checkHistory) {
       console.log('History check disabled');
@@ -116,7 +114,6 @@ function FileUpload({ onResult }) {
       if (response.data.matches_found > 0) {
         console.log(`✅ File ${fileNumber}: Found ${response.data.matches_found} matches!`);
         
-        // Transform the response
         const transformedMatches = {
           matches_found: response.data.matches_found,
           highest_similarity: response.data.highest_similarity,
@@ -128,10 +125,7 @@ function FileUpload({ onResult }) {
             matched_text: match.matched_text_preview,
             original_text1: match.original_text1_preview,
             original_text2: match.original_text2_preview,
-            file_name: match.file_name,
-            matched_with: match.matched_with,
-            text_name: match.text_name,
-            text_metadata: match.text_metadata
+            file_name: match.file_name
           }))
         };
 
@@ -161,21 +155,19 @@ function FileUpload({ onResult }) {
     setHistoryMatches2(null);
     setShowHistoryMatches1(false);
     setShowHistoryMatches2(false);
+    setResult(null);
 
     try {
-      // First, extract text from both files for later comparison view
       const text1 = await extractTextFromFile(file1);
       const text2 = await extractTextFromFile(file2);
 
       setExtractedText1(text1);
       setExtractedText2(text2);
 
-      // STEP 1: Check BOTH files against history SEPARATELY
       if (checkHistory) {
         console.log('STEP 1: Checking BOTH files separately against history...');
         setCheckingHistory(true);
 
-        // Check both files in parallel
         const [result1, result2] = await Promise.all([
           checkFileAgainstHistory(file1, 1),
           checkFileAgainstHistory(file2, 2)
@@ -183,7 +175,6 @@ function FileUpload({ onResult }) {
 
         setCheckingHistory(false);
 
-        // Store matches if found
         if (result1.found) {
           setHistoryMatches1(result1.matches);
         }
@@ -191,7 +182,6 @@ function FileUpload({ onResult }) {
           setHistoryMatches2(result2.matches);
         }
 
-        // Show combined alert for both files
         if (result1.found && result2.found) {
           alert(
             `⚠️ WARNING: BOTH FILES FOUND IN HISTORY!\n\n` +
@@ -228,16 +218,10 @@ function FileUpload({ onResult }) {
           );
           setShowHistoryMatches2(true);
         } else {
-          alert(
-            `✅ NO SIMILAR CONTENT FOUND\n\n` +
-            `📄 File 1: ${file1.name} - New content ✅\n` +
-            `📄 File 2: ${file2.name} - New content ✅\n\n` +
-            `Both files appear to be new submissions.`
-          );
+          console.log('✅ No matches found for either file - both are new content');
         }
       }
 
-      // STEP 2: Upload and compare files
       console.log('STEP 2: Uploading files for comparison...');
       setLoading(true);
 
@@ -251,16 +235,26 @@ function FileUpload({ onResult }) {
       
       console.log('✅ Upload successful:', response.data);
       
-      onResult(response.data);
+      setResult(response.data);
+      if (onResult) {
+        onResult(response.data);
+      }
       
-      // Build success message
       let message = `✅ FILES COMPARED SUCCESSFULLY!\n\n`;
       message += `📄 File 1: ${file1.name}\n`;
       message += `📄 File 2: ${file2.name}\n`;
       message += `📊 Similarity: ${response.data.similarity_score}%\n`;
       
       if (response.data.google_similarity !== null) {
-        message += `🌐 Google Similarity: ${response.data.google_similarity}%\n`;
+        message += `🌐 Overall Google Similarity: ${response.data.google_similarity}%\n`;
+      }
+      
+      if (response.data.google_similarity_text1 !== null) {
+        message += `🌐 File 1 Google: ${response.data.google_similarity_text1}%\n`;
+      }
+      
+      if (response.data.google_similarity_text2 !== null) {
+        message += `🌐 File 2 Google: ${response.data.google_similarity_text2}%\n`;
       }
       
       if (response.data.ai_detection) {
@@ -307,11 +301,11 @@ function FileUpload({ onResult }) {
 
       {checkHistory && (
         <div className="history-check-info">
-          <p>📋 <strong>History Check Enabled - Separate File Checking:</strong></p>
+          <p>📋 <strong>Separate History Check Enabled:</strong></p>
           <ul>
-            <li>✅ <strong>File 1</strong> is checked SEPARATELY against your entire history</li>
-            <li>✅ <strong>File 2</strong> is checked SEPARATELY against your entire history</li>
-            <li>🔍 Both files are compared independently for maximum accuracy</li>
+            <li>✅ <strong>File 1</strong> is checked independently against your entire submission history</li>
+            <li>✅ <strong>File 2</strong> is checked independently against your entire submission history</li>
+            <li>🔍 Both files are analyzed <strong>separately</strong> for maximum accuracy</li>
             <li>⚡ Files are checked BEFORE comparison to detect resubmissions</li>
             <li>🔔 You'll be alerted separately if either or both files were submitted before</li>
             <li>💾 All files are stored with detailed metadata for future checks</li>
@@ -410,7 +404,7 @@ function FileUpload({ onResult }) {
             checked={checkGoogle}
             onChange={(e) => setCheckGoogle(e.target.checked)}
           />
-          Check Google Similarity
+          Check Google Similarity (Both Files Separately)
         </label>
         <label>
           <input
@@ -426,7 +420,7 @@ function FileUpload({ onResult }) {
             checked={checkHistory}
             onChange={(e) => setCheckHistory(e.target.checked)}
           />
-          Check Against Past History (Both Files Separately)
+          Check Both Files Separately Against Past History
         </label>
       </div>
 
@@ -438,19 +432,197 @@ function FileUpload({ onResult }) {
         {checkingHistory ? (
           <>
             <span className="spinner-small"></span>
-            Checking Files Separately...
+            🔍 Checking Files Separately...
           </>
         ) : loading ? (
           <>
             <span className="spinner-small"></span>
-            Processing Files...
+            ⏳ Processing Files...
           </>
         ) : (
           '📊 Compare Files'
         )}
       </button>
 
-      {/* History Matches Modal for File 1 */}
+      {(historyMatches1 || historyMatches2) && (
+        <div className="history-status-summary">
+          <h3>📋 History Check Results:</h3>
+          <div className="history-status-cards">
+            {historyMatches1 && (
+              <div 
+                className="history-status-card file1-status"
+                data-severity={
+                  historyMatches1.highest_similarity >= 80 ? 'high' :
+                  historyMatches1.highest_similarity >= 50 ? 'medium' : 'low'
+                }
+              >
+                <h4>📄 File 1</h4>
+                <p className="file-display-name">{file1?.name}</p>
+                <p className="match-count">{historyMatches1.matches_found} Match(es) Found</p>
+                <p className="highest-sim">Highest: {historyMatches1.highest_similarity}%</p>
+                <button 
+                  onClick={() => setShowHistoryMatches1(true)} 
+                  className="btn-view-matches"
+                >
+                  View Details
+                </button>
+              </div>
+            )}
+            {historyMatches2 && (
+              <div 
+                className="history-status-card file2-status"
+                data-severity={
+                  historyMatches2.highest_similarity >= 80 ? 'high' :
+                  historyMatches2.highest_similarity >= 50 ? 'medium' : 'low'
+                }
+              >
+                <h4>📄 File 2</h4>
+                <p className="file-display-name">{file2?.name}</p>
+                <p className="match-count">{historyMatches2.matches_found} Match(es) Found</p>
+                <p className="highest-sim">Highest: {historyMatches2.highest_similarity}%</p>
+                <button 
+                  onClick={() => setShowHistoryMatches2(true)} 
+                  className="btn-view-matches"
+                >
+                  View Details
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Display Results with Separate Google Similarity */}
+      {result && (
+        <div className="result-container">
+          <h3>Results</h3>
+          
+          {/* Main Similarity Card */}
+          <div className="result-card">
+            <div className="result-item">
+              <span className="result-label">Text Similarity:</span>
+              <span
+                className="result-value"
+                style={{ color: getSimilarityColor(result.similarity_score) }}
+              >
+                {result.similarity_score}%
+              </span>
+            </div>
+            <div className="result-message">
+              <strong>{result.message}</strong>
+            </div>
+          </div>
+
+          {/* Separate Google Results Section */}
+          {checkGoogle && (result.google_similarity_text1 !== null || result.google_similarity_text2 !== null) && (
+            <div className="google-results-section">
+              <h3>🌐 Google Similarity Results (Checked Separately)</h3>
+              
+              <div className="google-comparison-cards">
+                {/* File 1 Google Results */}
+                {result.google_similarity_text1 !== null && (
+                  <div className="google-result-card file1-google">
+                    <div className="google-card-header">
+                      <h4>📄 File 1: {file1?.name}</h4>
+                      <span 
+                        className="google-score-badge"
+                        style={{ backgroundColor: getSimilarityColor(result.google_similarity_text1) }}
+                      >
+                        {result.google_similarity_text1}%
+                      </span>
+                    </div>
+                    
+                    {result.google_highlighted_text1 && result.google_similarity_text1 > 0 && (
+                      <div className="google-mini-preview">
+                        <p className="preview-label">Matched segments found online:</p>
+                        <div 
+                          className="mini-highlighted-text"
+                          dangerouslySetInnerHTML={{ 
+                            __html: result.google_highlighted_text1.substring(0, 200) + '...' 
+                          }}
+                        />
+                      </div>
+                    )}
+                    
+                    {result.google_sources_text1 && result.google_sources_text1.length > 0 && (
+                      <div className="source-count">
+                        📚 {result.google_sources_text1.length} source(s) found
+                      </div>
+                    )}
+                    
+                    {result.google_similarity_text1 === 0 && (
+                      <p className="no-google-match">✅ No similar content found on Google</p>
+                    )}
+                  </div>
+                )}
+
+                {/* File 2 Google Results */}
+                {result.google_similarity_text2 !== null && (
+                  <div className="google-result-card file2-google">
+                    <div className="google-card-header">
+                      <h4>📄 File 2: {file2?.name}</h4>
+                      <span 
+                        className="google-score-badge"
+                        style={{ backgroundColor: getSimilarityColor(result.google_similarity_text2) }}
+                      >
+                        {result.google_similarity_text2}%
+                      </span>
+                    </div>
+                    
+                    {result.google_highlighted_text2 && result.google_similarity_text2 > 0 && (
+                      <div className="google-mini-preview">
+                        <p className="preview-label">Matched segments found online:</p>
+                        <div 
+                          className="mini-highlighted-text"
+                          dangerouslySetInnerHTML={{ 
+                            __html: result.google_highlighted_text2.substring(0, 200) + '...' 
+                          }}
+                        />
+                      </div>
+                    )}
+                    
+                    {result.google_sources_text2 && result.google_sources_text2.length > 0 && (
+                      <div className="source-count">
+                        📚 {result.google_sources_text2.length} source(s) found
+                      </div>
+                    )}
+                    
+                    {result.google_similarity_text2 === 0 && (
+                      <p className="no-google-match">✅ No similar content found on Google</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Detailed Google Sources for File 1 */}
+              {result.google_sources_text1 && result.google_sources_text1.length > 0 && (
+                <GoogleSources 
+                  sources={result.google_sources_text1} 
+                  similarity={result.google_similarity_text1}
+                  allMatches={result.all_google_matches_text1}
+                  title={`📄 File 1 (${file1?.name}) - Google Sources`}
+                />
+              )}
+
+              {/* Detailed Google Sources for File 2 */}
+              {result.google_sources_text2 && result.google_sources_text2.length > 0 && (
+                <GoogleSources 
+                  sources={result.google_sources_text2} 
+                  similarity={result.google_similarity_text2}
+                  allMatches={result.all_google_matches_text2}
+                  title={`📄 File 2 (${file2?.name}) - Google Sources`}
+                />
+              )}
+            </div>
+          )}
+
+          {/* AI Detection Results */}
+          {result.ai_detection && (
+            <AIDetectionResult aiResult={result.ai_detection} />
+          )}
+        </div>
+      )}
+
       {showHistoryMatches1 && historyMatches1 && (
         <HistoryMatches
           matches={historyMatches1}
@@ -460,7 +632,6 @@ function FileUpload({ onResult }) {
         />
       )}
 
-      {/* History Matches Modal for File 2 */}
       {showHistoryMatches2 && historyMatches2 && (
         <HistoryMatches
           matches={historyMatches2}

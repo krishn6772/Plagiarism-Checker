@@ -6,7 +6,6 @@ import HistoryMatches from '../components/HistoryMatches';
 import GoogleSources from '../components/GoogleSources';
 import GoogleOnlyCheck from '../components/GoogleOnlyCheck';
 import AIDetectionResult from '../components/AIDetectionResult';
-import GoogleSimilarityViewer from '../components/GoogleSimilarityViewer';
 import './Dashboard.css';
 
 function UserDashboard({ user, onLogout }) {
@@ -26,7 +25,6 @@ function UserDashboard({ user, onLogout }) {
   const [showHistoryMatches1, setShowHistoryMatches1] = useState(false);
   const [showHistoryMatches2, setShowHistoryMatches2] = useState(false);
   const [checkingHistory, setCheckingHistory] = useState(false);
-  const [showGoogleViewer, setShowGoogleViewer] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -94,10 +92,9 @@ function UserDashboard({ user, onLogout }) {
     }).join('');
   };
 
-  // Check Text 1 against history
   const checkText1AgainstHistory = async (text) => {
     if (!checkHistory || !text || text.trim().length < 50) {
-      return false;
+      return null;
     }
 
     console.log('🔍 Checking Text 1 against history...');
@@ -110,20 +107,19 @@ function UserDashboard({ user, onLogout }) {
 
       if (response.data.matches_found > 0) {
         console.log(`✅ Text 1: Found ${response.data.matches_found} matches`);
-        setHistoryMatches1(response.data);
-        return true;
+        return response.data;
       }
-      return false;
+      console.log('✅ Text 1: No matches found');
+      return null;
     } catch (error) {
-      console.error('Error checking Text 1 history:', error);
-      return false;
+      console.error('❌ Error checking Text 1 history:', error);
+      return null;
     }
   };
 
-  // Check Text 2 against history
   const checkText2AgainstHistory = async (text) => {
     if (!checkHistory || !text || text.trim().length < 50) {
-      return false;
+      return null;
     }
 
     console.log('🔍 Checking Text 2 against history...');
@@ -136,13 +132,13 @@ function UserDashboard({ user, onLogout }) {
 
       if (response.data.matches_found > 0) {
         console.log(`✅ Text 2: Found ${response.data.matches_found} matches`);
-        setHistoryMatches2(response.data);
-        return true;
+        return response.data;
       }
-      return false;
+      console.log('✅ Text 2: No matches found');
+      return null;
     } catch (error) {
-      console.error('Error checking Text 2 history:', error);
-      return false;
+      console.error('❌ Error checking Text 2 history:', error);
+      return null;
     }
   };
 
@@ -162,69 +158,63 @@ function UserDashboard({ user, onLogout }) {
     setShowHistoryMatches2(false);
 
     try {
-      // Check both texts against history SEPARATELY
       if (checkHistory) {
         setCheckingHistory(true);
-        console.log('=== Checking History for Both Texts Separately ===');
+        console.log('=== 🔍 Checking History for Both Texts (SEPARATELY) ===');
 
-        const [match1Found, match2Found] = await Promise.all([
+        const [matches1Data, matches2Data] = await Promise.all([
           checkText1AgainstHistory(text1),
           checkText2AgainstHistory(text2)
         ]);
 
         setCheckingHistory(false);
 
-        // Show detailed results for both checks
-        if (match1Found && match2Found) {
-          const text1Matches = historyMatches1?.matches_found || 0;
-          const text2Matches = historyMatches2?.matches_found || 0;
-          const text1Similarity = historyMatches1?.highest_similarity || 0;
-          const text2Similarity = historyMatches2?.highest_similarity || 0;
-          
+        if (matches1Data) {
+          setHistoryMatches1(matches1Data);
+        }
+        if (matches2Data) {
+          setHistoryMatches2(matches2Data);
+        }
+
+        if (matches1Data && matches2Data) {
           alert(
             `⚠️ WARNING: BOTH TEXTS FOUND IN YOUR HISTORY!\n\n` +
             `📝 Text 1:\n` +
-            `  • ${text1Matches} match(es) found\n` +
-            `  • Highest similarity: ${text1Similarity}%\n\n` +
+            `  • ${matches1Data.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${matches1Data.highest_similarity}%\n\n` +
             `📝 Text 2:\n` +
-            `  • ${text2Matches} match(es) found\n` +
-            `  • Highest similarity: ${text2Similarity}%\n\n` +
+            `  • ${matches2Data.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${matches2Data.highest_similarity}%\n\n` +
             `Click OK to view detailed matches for both texts.`
           );
           setShowHistoryMatches1(true);
           setShowHistoryMatches2(true);
-        } else if (match1Found) {
-          const text1Matches = historyMatches1?.matches_found || 0;
-          const text1Similarity = historyMatches1?.highest_similarity || 0;
-          
+        } else if (matches1Data) {
           alert(
             `⚠️ WARNING: Text 1 Found in Your History!\n\n` +
             `📝 Text 1 Details:\n` +
-            `  • ${text1Matches} match(es) found\n` +
-            `  • Highest similarity: ${text1Similarity}%\n\n` +
-            `Text 2: No matches found ✅\n\n` +
+            `  • ${matches1Data.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${matches1Data.highest_similarity}%\n\n` +
+            `✅ Text 2: No matches found (new content)\n\n` +
             `Click OK to view Text 1 matches.`
           );
           setShowHistoryMatches1(true);
-        } else if (match2Found) {
-          const text2Matches = historyMatches2?.matches_found || 0;
-          const text2Similarity = historyMatches2?.highest_similarity || 0;
-          
+        } else if (matches2Data) {
           alert(
             `⚠️ WARNING: Text 2 Found in Your History!\n\n` +
-            `Text 1: No matches found ✅\n\n` +
+            `✅ Text 1: No matches found (new content)\n\n` +
             `📝 Text 2 Details:\n` +
-            `  • ${text2Matches} match(es) found\n` +
-            `  • Highest similarity: ${text2Similarity}%\n\n` +
+            `  • ${matches2Data.matches_found} match(es) found\n` +
+            `  • ${matches2Data.highest_similarity}%\n\n` +
             `Click OK to view Text 2 matches.`
           );
           setShowHistoryMatches2(true);
         } else {
-          console.log('✅ No matches found for either text - new content');
+          console.log('✅ No matches found for either text - Both are new content');
         }
       }
 
-      // Perform normal plagiarism check
+      console.log('📊 Performing text comparison...');
       const response = await checkPlagiarism({
         text1,
         text2,
@@ -323,12 +313,12 @@ function UserDashboard({ user, onLogout }) {
 
             {checkHistory && (
               <div className="history-check-info">
-                <p>📋 <strong>History Check Enabled - Separate Checking:</strong></p>
+                <p>📋 <strong>Separate History Check Enabled:</strong></p>
                 <ul>
-                  <li>✅ <strong>Text 1</strong> is checked SEPARATELY against all past submissions</li>
-                  <li>✅ <strong>Text 2</strong> is checked SEPARATELY against all past submissions</li>
-                  <li>🔍 Both texts are compared independently for maximum accuracy</li>
-                  <li>📊 You'll see detailed results for each text individually</li>
+                  <li>✅ <strong>Text 1</strong> is checked independently against your entire submission history</li>
+                  <li>✅ <strong>Text 2</strong> is checked independently against your entire submission history</li>
+                  <li>🔍 Both texts are analyzed <strong>separately</strong> for maximum accuracy</li>
+                  <li>📊 You'll see detailed match information for each text individually</li>
                   <li>🔔 Separate alerts will show if either or both texts were previously submitted</li>
                 </ul>
               </div>
@@ -344,6 +334,9 @@ function UserDashboard({ user, onLogout }) {
                     placeholder="Enter first text here..."
                     rows="10"
                   />
+                  <div className="text-info">
+                    {text1.length} characters | {text1.split(/\s+/).filter(w => w).length} words
+                  </div>
                 </div>
                 <div className="text-input-container">
                   <label>Text 2</label>
@@ -353,6 +346,9 @@ function UserDashboard({ user, onLogout }) {
                     placeholder="Enter second text here..."
                     rows="10"
                   />
+                  <div className="text-info">
+                    {text2.length} characters | {text2.split(/\s+/).filter(w => w).length} words
+                  </div>
                 </div>
               </div>
             ) : (
@@ -381,7 +377,7 @@ function UserDashboard({ user, onLogout }) {
                   checked={checkGoogle}
                   onChange={(e) => setCheckGoogle(e.target.checked)}
                 />
-                Check Google Similarity
+                Check Google Similarity (Both Texts Separately)
               </label>
               <label>
                 <input
@@ -397,7 +393,7 @@ function UserDashboard({ user, onLogout }) {
                   checked={checkHistory}
                   onChange={(e) => setCheckHistory(e.target.checked)}
                 />
-                Check Against Past History (Both Texts Separately)
+                Check Both Texts Separately Against Past History
               </label>
             </div>
 
@@ -406,15 +402,15 @@ function UserDashboard({ user, onLogout }) {
                 {checkingHistory ? (
                   <>
                     <span className="spinner-small"></span>
-                    Checking History Separately...
+                    🔍 Checking History Separately...
                   </>
                 ) : loading ? (
                   <>
                     <span className="spinner-small"></span>
-                    Checking...
+                    ⏳ Checking Plagiarism...
                   </>
                 ) : (
-                  'Check Plagiarism'
+                  '✅ Check Plagiarism'
                 )}
               </button>
               {result && (
@@ -430,14 +426,56 @@ function UserDashboard({ user, onLogout }) {
                   }}
                   className="btn-secondary"
                 >
-                  Check Another
+                  🔄 Check Another
                 </button>
               )}
             </div>
 
+            {(historyMatches1 || historyMatches2) && (
+              <div className="history-status-summary">
+                <h3>📋 History Check Results:</h3>
+                <div className="history-status-cards">
+                  {historyMatches1 && (
+                    <div 
+                      className="history-status-card text1-status"
+                      data-severity={
+                        historyMatches1.highest_similarity >= 80 ? 'high' :
+                        historyMatches1.highest_similarity >= 50 ? 'medium' : 'low'
+                      }
+                    >
+                      <h4>📝 Text 1</h4>
+                      <p className="match-count">{historyMatches1.matches_found} Match(es) Found</p>
+                      <p className="highest-sim">Highest: {historyMatches1.highest_similarity}%</p>
+                      <button onClick={() => setShowHistoryMatches1(true)} className="btn-view-matches">
+                        View Details
+                      </button>
+                    </div>
+                  )}
+                  {historyMatches2 && (
+                    <div 
+                      className="history-status-card text2-status"
+                      data-severity={
+                        historyMatches2.highest_similarity >= 80 ? 'high' :
+                        historyMatches2.highest_similarity >= 50 ? 'medium' : 'low'
+                      }
+                    >
+                      <h4>📝 Text 2</h4>
+                      <p className="match-count">{historyMatches2.matches_found} Match(es) Found</p>
+                      <p className="highest-sim">Highest: {historyMatches2.highest_similarity}%</p>
+                      <button onClick={() => setShowHistoryMatches2(true)} className="btn-view-matches">
+                        View Details
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {result && (
               <div className="result-container">
                 <h3>Results</h3>
+                
+                {/* Main Similarity Result */}
                 <div className="result-card">
                   <div className="result-item">
                     <span className="result-label">Text Similarity:</span>
@@ -448,17 +486,6 @@ function UserDashboard({ user, onLogout }) {
                       {result.similarity_score}%
                     </span>
                   </div>
-                  {result.google_similarity !== null && (
-                    <div className="result-item">
-                      <span className="result-label">Google Similarity:</span>
-                      <span
-                        className="result-value"
-                        style={{ color: getSimilarityColor(result.google_similarity) }}
-                      >
-                        {result.google_similarity}%
-                      </span>
-                    </div>
-                  )}
                   <div className="result-message">
                     <strong>{result.message}</strong>
                   </div>
@@ -470,27 +497,108 @@ function UserDashboard({ user, onLogout }) {
                     </p>
                   </div>
                 </div>
-                
-                {result.ai_detection && (
-                  <AIDetectionResult aiResult={result.ai_detection} />
-                )}
-                
-                {result.google_highlighted_text && result.google_similarity > 0 && (
-                  <div className="google-highlighted-section">
-                    <h4>🌐 Your Text with Google Matches Highlighted:</h4>
-                    <div 
-                      className="google-highlighted-text"
-                      dangerouslySetInnerHTML={{ __html: result.google_highlighted_text }}
-                    />
+
+                {/* Separate Google Results for Text 1 and Text 2 */}
+                {checkGoogle && (result.google_similarity_text1 !== null || result.google_similarity_text2 !== null) && (
+                  <div className="google-results-section">
+                    <h3>🌐 Google Similarity Results (Checked Separately)</h3>
+                    
+                    <div className="google-comparison-cards">
+                      {/* Text 1 Google Results */}
+                      {result.google_similarity_text1 !== null && (
+                        <div className="google-result-card text1-google">
+                          <div className="google-card-header">
+                            <h4>📝 Text 1 - Google Check</h4>
+                            <span 
+                              className="google-score-badge"
+                              style={{ backgroundColor: getSimilarityColor(result.google_similarity_text1) }}
+                            >
+                              {result.google_similarity_text1}%
+                            </span>
+                          </div>
+                          
+                          {result.google_highlighted_text1 && result.google_similarity_text1 > 0 && (
+                            <div className="google-mini-preview">
+                              <p className="preview-label">Matched segments found online:</p>
+                              <div 
+                                className="mini-highlighted-text"
+                                dangerouslySetInnerHTML={{ __html: result.google_highlighted_text1.substring(0, 200) + '...' }}
+                              />
+                            </div>
+                          )}
+                          
+                          {result.google_sources_text1 && result.google_sources_text1.length > 0 && (
+                            <div className="source-count">
+                              📚 {result.google_sources_text1.length} source(s) found
+                            </div>
+                          )}
+                          
+                          {result.google_similarity_text1 === 0 && (
+                            <p className="no-google-match">✅ No similar content found on Google</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Text 2 Google Results */}
+                      {result.google_similarity_text2 !== null && (
+                        <div className="google-result-card text2-google">
+                          <div className="google-card-header">
+                            <h4>📝 Text 2 - Google Check</h4>
+                            <span 
+                              className="google-score-badge"
+                              style={{ backgroundColor: getSimilarityColor(result.google_similarity_text2) }}
+                            >
+                              {result.google_similarity_text2}%
+                            </span>
+                          </div>
+                          
+                          {result.google_highlighted_text2 && result.google_similarity_text2 > 0 && (
+                            <div className="google-mini-preview">
+                              <p className="preview-label">Matched segments found online:</p>
+                              <div 
+                                className="mini-highlighted-text"
+                                dangerouslySetInnerHTML={{ __html: result.google_highlighted_text2.substring(0, 200) + '...' }}
+                              />
+                            </div>
+                          )}
+                          
+                          {result.google_sources_text2 && result.google_sources_text2.length > 0 && (
+                            <div className="source-count">
+                              📚 {result.google_sources_text2.length} source(s) found
+                            </div>
+                          )}
+                          
+                          {result.google_similarity_text2 === 0 && (
+                            <p className="no-google-match">✅ No similar content found on Google</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Detailed Google Sources for Text 1 */}
+                    {result.google_sources_text1 && result.google_sources_text1.length > 0 && (
+                      <GoogleSources 
+                        sources={result.google_sources_text1} 
+                        similarity={result.google_similarity_text1}
+                        allMatches={result.all_google_matches_text1}
+                        title="📝 Text 1 - Google Sources"
+                      />
+                    )}
+
+                    {/* Detailed Google Sources for Text 2 */}
+                    {result.google_sources_text2 && result.google_sources_text2.length > 0 && (
+                      <GoogleSources 
+                        sources={result.google_sources_text2} 
+                        similarity={result.google_similarity_text2}
+                        allMatches={result.all_google_matches_text2}
+                        title="📝 Text 2 - Google Sources"
+                      />
+                    )}
                   </div>
                 )}
                 
-                {result.google_sources && result.google_sources.length > 0 && (
-                  <GoogleSources 
-                    sources={result.google_sources} 
-                    similarity={result.google_similarity}
-                    allMatches={result.all_google_matches}
-                  />
+                {result.ai_detection && (
+                  <AIDetectionResult aiResult={result.ai_detection} />
                 )}
               </div>
             )}
@@ -508,59 +616,7 @@ function UserDashboard({ user, onLogout }) {
 
         {activeTab === 'upload' && (
           <div className="tab-content">
-            <FileUpload onResult={setResult} />
-            {result && (
-              <div className="result-container">
-                <h3>Results</h3>
-                <div className="result-card">
-                  <div className="result-item">
-                    <span className="result-label">Text Similarity:</span>
-                    <span
-                      className="result-value"
-                      style={{ color: getSimilarityColor(result.similarity_score) }}
-                    >
-                      {result.similarity_score}%
-                    </span>
-                  </div>
-                  {result.google_similarity !== null && (
-                    <div className="result-item">
-                      <span className="result-label">Google Similarity:</span>
-                      <span
-                        className="result-value"
-                        style={{ color: getSimilarityColor(result.google_similarity) }}
-                      >
-                        {result.google_similarity}%
-                      </span>
-                    </div>
-                  )}
-                  <div className="result-message">
-                    <strong>{result.message}</strong>
-                  </div>
-                </div>
-                
-                {result.ai_detection && (
-                  <AIDetectionResult aiResult={result.ai_detection} />
-                )}
-                
-                {result.google_highlighted_text && result.google_similarity > 0 && (
-                  <div className="google-highlighted-section">
-                    <h4>🌐 Your Text with Google Matches Highlighted:</h4>
-                    <div 
-                      className="google-highlighted-text"
-                      dangerouslySetInnerHTML={{ __html: result.google_highlighted_text }}
-                    />
-                  </div>
-                )}
-                
-                {result.google_sources && result.google_sources.length > 0 && (
-                  <GoogleSources 
-                    sources={result.google_sources} 
-                    similarity={result.google_similarity}
-                    allMatches={result.all_google_matches}
-                  />
-                )}
-              </div>
-            )}
+            <FileUpload onResult={setResult} getSimilarityColor={getSimilarityColor} />
           </div>
         )}
 
@@ -579,7 +635,6 @@ function UserDashboard({ user, onLogout }) {
         )}
       </div>
 
-      {/* History Matches Modal for Text 1 */}
       {showHistoryMatches1 && historyMatches1 && (
         <HistoryMatches
           matches={historyMatches1}
@@ -589,25 +644,12 @@ function UserDashboard({ user, onLogout }) {
         />
       )}
 
-      {/* History Matches Modal for Text 2 */}
       {showHistoryMatches2 && historyMatches2 && (
         <HistoryMatches
           matches={historyMatches2}
           onClose={() => setShowHistoryMatches2(false)}
           title="📝 Text 2 - History Matches"
           currentText={text2}
-        />
-      )}
-
-      {/* Google Similarity Viewer */}
-      {showGoogleViewer && result && result.google_sources && (
-        <GoogleSimilarityViewer
-          currentText={text1}
-          googleSources={result.google_sources}
-          googleHighlightedText={result.google_highlighted_text}
-          allGoogleMatches={result.all_google_matches}
-          similarity={result.google_similarity}
-          onClose={() => setShowGoogleViewer(false)}
         />
       )}
     </div>

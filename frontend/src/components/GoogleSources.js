@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './GoogleSources.css';
 
-function GoogleSources({ sources, similarity, allMatches }) {
+function GoogleSources({ sources, similarity, allMatches, title }) {
   const [expandedSource, setExpandedSource] = useState(null);
 
   if (!sources || sources.length === 0) {
@@ -20,7 +20,7 @@ function GoogleSources({ sources, similarity, allMatches }) {
 
   return (
     <div className="google-sources-container">
-      <h4>🔍 Google Sources ({sources.length} found)</h4>
+      <h4>{title || `🔍 Google Sources (${sources.length} found)`}</h4>
       <p className="sources-intro">
         Similar content found on the following websites (Similarity: 
         <span style={{ color: getSimilarityColor(similarity), fontWeight: 'bold', marginLeft: '5px' }}>
@@ -31,7 +31,7 @@ function GoogleSources({ sources, similarity, allMatches }) {
       {/* Show all matching segments */}
       {allMatches && allMatches.length > 0 && (
         <div className="all-matches-section">
-          <h5>📝 Matching Text Segments Found Online:</h5>
+          <h5>🔍 Matching Text Segments Found Online:</h5>
           <div className="matches-list-chips">
             {allMatches.map((match, index) => (
               <div key={index} className="match-chip">
@@ -58,7 +58,7 @@ function GoogleSources({ sources, similarity, allMatches }) {
                   {source.similarity}%
                 </span>
                 <button className="expand-btn">
-                  {expandedSource === index ? '−' : '+'}
+                  {expandedSource === index ? '∧' : '+'}
                 </button>
               </div>
             </div>
