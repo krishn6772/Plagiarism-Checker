@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>PlagScan Pro Modern Favicon</title>
+  <rect x="0" y="0" width="32" height="32" rx="8" fill="#667eea"/>
+
+  <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 7V25"/>
+    <path d="M10 9H17C21 9 21 17 17 17H10"/>
+    <path d="M19 20L21.5 22.5L26 16" stroke-width="2.5"/>
+  </g>
+</svg>
