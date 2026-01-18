@@ -29,13 +29,19 @@ def extract_text_from_pdf(file_content: bytes) -> str:
         pdf_reader = PyPDF2.PdfReader(pdf_file)
         text = ""
         for page in pdf_reader.pages:
-            text += page.extract_text()
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+        
+        # If no text was extracted, return a meaningful message
+        if not text.strip():
+            return "[PDF file appears to be scanned or image-based. Text extraction not possible. Please use OCR or convert to text format.]"
+        
         return text.strip()
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error reading PDF file: {str(e)}"
-        )
+        print(f"PDF extraction error: {str(e)}")
+        # Return a fallback instead of raising an error
+        return f"[PDF text extraction failed: {str(e)}. File may be corrupted or password-protected.]"
 
 
 def extract_text_from_docx(file_content: bytes) -> str:
@@ -43,13 +49,17 @@ def extract_text_from_docx(file_content: bytes) -> str:
     try:
         docx_file = io.BytesIO(file_content)
         doc = docx.Document(docx_file)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
+        
+        # If no text was extracted, return a meaningful message
+        if not text.strip():
+            return "[DOCX file appears to be empty or contains only images. Text extraction not possible.]"
+        
         return text.strip()
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error reading DOCX file: {str(e)}"
-        )
+        print(f"DOCX extraction error: {str(e)}")
+        # Return a fallback instead of raising an error
+        return f"[DOCX text extraction failed: {str(e)}. File may be corrupted or password-protected.]"
 
 
 # Define schemas for Google-only check
@@ -86,27 +96,57 @@ async def check_plagiarism(
         plagiarism_data.text2
     )
 
-    # Check Google similarity if requested
-    google_similarity = None
-    google_sources = []
-    google_highlighted_text = None
-    all_google_matches = []
+    # Check Google similarity for BOTH texts if requested
+    google_similarity_text1 = None
+    google_sources_text1 = []
+    google_highlighted_text1 = None
+    all_google_matches_text1 = []
+
+    google_similarity_text2 = None
+    google_sources_text2 = []
+    google_highlighted_text2 = None
+    all_google_matches_text2 = []
 
     if plagiarism_data.check_google:
-        google_result = check_google_similarity(
+        # Check Text 1 against Google
+        google_result1 = check_google_similarity(
             plagiarism_data.text1,
             GOOGLE_API_KEY,
             GOOGLE_SEARCH_ENGINE_ID
         )
 
-        if google_result:
-            google_similarity = google_result["similarity_percentage"]
-            google_sources = [
-                GoogleSource(**source) for source in google_result["sources"]
+        if google_result1:
+            google_similarity_text1 = google_result1["similarity_percentage"]
+            google_sources_text1 = [
+                GoogleSource(**source) for source in google_result1["sources"]
             ]
-            google_highlighted_text = google_result.get(
+            google_highlighted_text1 = google_result1.get(
                 "highlighted_text", plagiarism_data.text1)
-            all_google_matches = google_result.get("all_matches", [])
+            all_google_matches_text1 = google_result1.get("all_matches", [])
+
+        # Check Text 2 against Google
+        google_result2 = check_google_similarity(
+            plagiarism_data.text2,
+            GOOGLE_API_KEY,
+            GOOGLE_SEARCH_ENGINE_ID
+        )
+
+        if google_result2:
+            google_similarity_text2 = google_result2["similarity_percentage"]
+            google_sources_text2 = [
+                GoogleSource(**source) for source in google_result2["sources"]
+            ]
+            google_highlighted_text2 = google_result2.get(
+                "highlighted_text", plagiarism_data.text2)
+            all_google_matches_text2 = google_result2.get("all_matches", [])
+
+    # Use higher Google similarity for overall score
+    google_similarity = None
+    if google_similarity_text1 is not None or google_similarity_text2 is not None:
+        google_similarity = max(
+            google_similarity_text1 if google_similarity_text1 is not None else 0,
+            google_similarity_text2 if google_similarity_text2 is not None else 0
+        )
 
     # Check AI content if requested
     ai_detection_result = None
@@ -122,18 +162,43 @@ async def check_plagiarism(
             highlighted_text=ai_result["highlighted_text"]
         )
 
-    # Save to history
+    # Save to history with separate text metadata
     history_entry = {
         "user_id": str(current_user["_id"]),
         "text1": plagiarism_data.text1,
         "text2": plagiarism_data.text2,
+        "text1_name": "Text 1 (Manual Input)",
+        "text2_name": "Text 2 (Manual Input)",
+        "text1_metadata": {
+            "source": "manual_input",
+            "length": len(plagiarism_data.text1),
+            "word_count": len(plagiarism_data.text1.split()),
+            "submitted_at": datetime.utcnow().isoformat(),
+            "google_similarity": google_similarity_text1,
+            "google_sources_count": len(google_sources_text1) if google_sources_text1 else 0
+        },
+        "text2_metadata": {
+            "source": "manual_input",
+            "length": len(plagiarism_data.text2),
+            "word_count": len(plagiarism_data.text2.split()),
+            "submitted_at": datetime.utcnow().isoformat(),
+            "google_similarity": google_similarity_text2,
+            "google_sources_count": len(google_sources_text2) if google_sources_text2 else 0
+        },
         "similarity_score": similarity_score,
         "google_similarity": google_similarity,
-        "google_sources": [source.dict() for source in google_sources] if google_sources else None,
-        "google_highlighted_text": google_highlighted_text,
+        "google_similarity_text1": google_similarity_text1,
+        "google_similarity_text2": google_similarity_text2,
+        "google_sources_text1": [source.dict() for source in google_sources_text1] if google_sources_text1 else None,
+        "google_sources_text2": [source.dict() for source in google_sources_text2] if google_sources_text2 else None,
+        "google_highlighted_text1": google_highlighted_text1,
+        "google_highlighted_text2": google_highlighted_text2,
+        "google_sources": [source.dict() for source in google_sources_text1] if google_sources_text1 else None,
+        "google_highlighted_text": google_highlighted_text1,
         "ai_detection": ai_detection_result.dict() if ai_detection_result else None,
         "timestamp": datetime.utcnow(),
-        "file_name": None
+        "file_name": None,
+        "check_type": "text_comparison"
     }
 
     await db.history.insert_one(history_entry)
@@ -149,9 +214,17 @@ async def check_plagiarism(
     return PlagiarismResult(
         similarity_score=similarity_score,
         google_similarity=google_similarity,
-        google_sources=google_sources if google_sources else None,
-        google_highlighted_text=google_highlighted_text,
-        all_google_matches=all_google_matches if all_google_matches else None,
+        google_similarity_text1=google_similarity_text1,
+        google_similarity_text2=google_similarity_text2,
+        google_sources=google_sources_text1 if google_sources_text1 else None,
+        google_sources_text1=google_sources_text1 if google_sources_text1 else None,
+        google_sources_text2=google_sources_text2 if google_sources_text2 else None,
+        google_highlighted_text=google_highlighted_text1,
+        google_highlighted_text1=google_highlighted_text1,
+        google_highlighted_text2=google_highlighted_text2,
+        all_google_matches=all_google_matches_text1 if all_google_matches_text1 else None,
+        all_google_matches_text1=all_google_matches_text1 if all_google_matches_text1 else None,
+        all_google_matches_text2=all_google_matches_text2 if all_google_matches_text2 else None,
         ai_detection=ai_detection_result,
         message=message
     )
@@ -191,45 +264,88 @@ async def check_plagiarism_from_file(
     elif file1.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         text1 = extract_text_from_docx(content1)
     else:
-        text1 = content1.decode("utf-8")
+        try:
+            text1 = content1.decode("utf-8")
+        except UnicodeDecodeError:
+            text1 = content1.decode("latin-1", errors='ignore')
 
     if file2.content_type == "application/pdf":
         text2 = extract_text_from_pdf(content2)
     elif file2.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         text2 = extract_text_from_docx(content2)
     else:
-        text2 = content2.decode("utf-8")
+        try:
+            text2 = content2.decode("utf-8")
+        except UnicodeDecodeError:
+            text2 = content2.decode("latin-1", errors='ignore')
 
-    if not text1 or not text2:
+    # Check if text extraction was successful
+    if not text1 or len(text1.strip()) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not extract text from one or both files"
+            detail=f"Could not extract meaningful text from {file1.filename}. The file may be empty, corrupted, or image-based."
+        )
+    
+    if not text2 or len(text2.strip()) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not extract meaningful text from {file2.filename}. The file may be empty, corrupted, or image-based."
         )
 
     # Calculate similarity
     similarity_score = calculate_text_similarity(text1, text2)
 
-    # Check Google similarity if requested
-    google_similarity = None
-    google_sources = []
-    google_highlighted_text = None
-    all_google_matches = []
+    # Check Google similarity for BOTH files if requested
+    google_similarity_text1 = None
+    google_sources_text1 = []
+    google_highlighted_text1 = None
+    all_google_matches_text1 = []
+
+    google_similarity_text2 = None
+    google_sources_text2 = []
+    google_highlighted_text2 = None
+    all_google_matches_text2 = []
 
     if check_google:
-        google_result = check_google_similarity(
+        # Check File 1 (text1) against Google
+        google_result1 = check_google_similarity(
             text1,
             GOOGLE_API_KEY,
             GOOGLE_SEARCH_ENGINE_ID
         )
 
-        if google_result:
-            google_similarity = google_result["similarity_percentage"]
-            google_sources = [
-                GoogleSource(**source) for source in google_result["sources"]
+        if google_result1:
+            google_similarity_text1 = google_result1["similarity_percentage"]
+            google_sources_text1 = [
+                GoogleSource(**source) for source in google_result1["sources"]
             ]
-            google_highlighted_text = google_result.get(
+            google_highlighted_text1 = google_result1.get(
                 "highlighted_text", text1)
-            all_google_matches = google_result.get("all_matches", [])
+            all_google_matches_text1 = google_result1.get("all_matches", [])
+
+        # Check File 2 (text2) against Google
+        google_result2 = check_google_similarity(
+            text2,
+            GOOGLE_API_KEY,
+            GOOGLE_SEARCH_ENGINE_ID
+        )
+
+        if google_result2:
+            google_similarity_text2 = google_result2["similarity_percentage"]
+            google_sources_text2 = [
+                GoogleSource(**source) for source in google_result2["sources"]
+            ]
+            google_highlighted_text2 = google_result2.get(
+                "highlighted_text", text2)
+            all_google_matches_text2 = google_result2.get("all_matches", [])
+
+    # Use higher Google similarity for overall score
+    google_similarity = None
+    if google_similarity_text1 is not None or google_similarity_text2 is not None:
+        google_similarity = max(
+            google_similarity_text1 if google_similarity_text1 is not None else 0,
+            google_similarity_text2 if google_similarity_text2 is not None else 0
+        )
 
     # Check AI content if requested
     ai_detection_result = None
@@ -245,18 +361,49 @@ async def check_plagiarism_from_file(
             highlighted_text=ai_result["highlighted_text"]
         )
 
-    # Save to history with full text for better history matching
+    # Save to history with detailed metadata for each file
     history_entry = {
         "user_id": str(current_user["_id"]),
-        "text1": text1,  # Store full text for history matching
-        "text2": text2,  # Store full text for history matching
+        "text1": text1,
+        "text2": text2,
+        "text1_name": file1.filename,
+        "text2_name": file2.filename,
+        "text1_metadata": {
+            "source": "file_upload",
+            "filename": file1.filename,
+            "file_type": file1.content_type,
+            "file_size": len(content1),
+            "length": len(text1),
+            "word_count": len(text1.split()),
+            "submitted_at": datetime.utcnow().isoformat(),
+            "google_similarity": google_similarity_text1,
+            "google_sources_count": len(google_sources_text1) if google_sources_text1 else 0
+        },
+        "text2_metadata": {
+            "source": "file_upload",
+            "filename": file2.filename,
+            "file_type": file2.content_type,
+            "file_size": len(content2),
+            "length": len(text2),
+            "word_count": len(text2.split()),
+            "submitted_at": datetime.utcnow().isoformat(),
+            "google_similarity": google_similarity_text2,
+            "google_sources_count": len(google_sources_text2) if google_sources_text2 else 0
+        },
         "similarity_score": similarity_score,
         "google_similarity": google_similarity,
-        "google_sources": [source.dict() for source in google_sources] if google_sources else None,
-        "google_highlighted_text": google_highlighted_text,
+        "google_similarity_text1": google_similarity_text1,
+        "google_similarity_text2": google_similarity_text2,
+        "google_sources_text1": [source.dict() for source in google_sources_text1] if google_sources_text1 else None,
+        "google_sources_text2": [source.dict() for source in google_sources_text2] if google_sources_text2 else None,
+        "google_highlighted_text1": google_highlighted_text1,
+        "google_highlighted_text2": google_highlighted_text2,
+        "google_sources": [source.dict() for source in google_sources_text1] if google_sources_text1 else None,
+        "google_highlighted_text": google_highlighted_text1,
         "ai_detection": ai_detection_result.dict() if ai_detection_result else None,
         "timestamp": datetime.utcnow(),
-        "file_name": f"{file1.filename} vs {file2.filename}"
+        "file_name": f"{file1.filename} vs {file2.filename}",
+        "check_type": "file_upload"
     }
 
     await db.history.insert_one(history_entry)
@@ -272,9 +419,17 @@ async def check_plagiarism_from_file(
     return PlagiarismResult(
         similarity_score=similarity_score,
         google_similarity=google_similarity,
-        google_sources=google_sources if google_sources else None,
-        google_highlighted_text=google_highlighted_text,
-        all_google_matches=all_google_matches if all_google_matches else None,
+        google_similarity_text1=google_similarity_text1,
+        google_similarity_text2=google_similarity_text2,
+        google_sources=google_sources_text1 if google_sources_text1 else None,
+        google_sources_text1=google_sources_text1 if google_sources_text1 else None,
+        google_sources_text2=google_sources_text2 if google_sources_text2 else None,
+        google_highlighted_text=google_highlighted_text1,
+        google_highlighted_text1=google_highlighted_text1,
+        google_highlighted_text2=google_highlighted_text2,
+        all_google_matches=all_google_matches_text1 if all_google_matches_text1 else None,
+        all_google_matches_text1=all_google_matches_text1 if all_google_matches_text1 else None,
+        all_google_matches_text2=all_google_matches_text2 if all_google_matches_text2 else None,
         ai_detection=ai_detection_result,
         message=message
     )
@@ -320,17 +475,27 @@ async def check_google_only(
             detail="Google API not configured or request failed"
         )
 
-    # Save to history (optional - as google-only check)
+    # Save to history
     history_entry = {
         "user_id": str(current_user["_id"]),
         "text1": google_check.text,
         "text2": "[Google Only Check]",
+        "text1_name": "Google Check Input",
+        "text2_name": None,
+        "text1_metadata": {
+            "source": "google_only_check",
+            "length": len(google_check.text),
+            "word_count": len(google_check.text.split()),
+            "submitted_at": datetime.utcnow().isoformat()
+        },
+        "text2_metadata": None,
         "similarity_score": 0.0,
         "google_similarity": google_similarity,
         "google_sources": [source.dict() for source in google_sources] if google_sources else None,
         "google_highlighted_text": google_highlighted_text,
         "timestamp": datetime.utcnow(),
-        "file_name": None
+        "file_name": None,
+        "check_type": "google_only"
     }
 
     await db.history.insert_one(history_entry)

@@ -19,6 +19,9 @@ class FileHistoryMatch(BaseModel):
     matched_text_preview: str
     original_text1_preview: str
     original_text2_preview: str
+    matched_with: str  # NEW: "text1" or "text2"
+    text_name: Optional[str] = None  # NEW: Name of matched text
+    text_metadata: Optional[dict] = None  # NEW: Metadata of matched text
 
 class FileHistorySearchResponse(BaseModel):
     matches_found: int
@@ -59,12 +62,12 @@ async def check_file_in_history(
 ):
     """
     Check if uploaded file content matches any previous submissions in history
-    Works for PDF, DOCX, and TXT files
+    Works for PDF, DOCX, and TXT files - checks separately against text1 and text2
     """
     db = get_database()
     user_id = str(current_user["_id"])
     
-    print(f"Checking file history for: {file.filename}, Type: {file.content_type}")
+    print(f"📄 Checking file history for: {file.filename}, Type: {file.content_type}")
     
     # Extract text from uploaded file
     content = await file.read()
@@ -76,7 +79,10 @@ async def check_file_in_history(
         text = extract_text_from_docx(content)
         print(f"Extracted {len(text)} characters from DOCX")
     elif file.content_type == "text/plain":
-        text = content.decode("utf-8", errors='ignore')
+        try:
+            text = content.decode("utf-8", errors='ignore')
+        except Exception as e:
+            text = content.decode("latin-1", errors='ignore')
         print(f"Read {len(text)} characters from TXT")
     else:
         raise HTTPException(
@@ -85,11 +91,10 @@ async def check_file_in_history(
         )
     
     if not text or len(text.strip()) < 50:
-        print(f"Text too short: {len(text)} characters")
-        return FileHistorySearchResponse(
-            matches_found=0,
-            matches=[],
-            highest_similarity=0.0
+        print(f"⚠️ Text too short: {len(text)} characters")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not extract meaningful text from {file.filename}. The file may be empty, corrupted, or image-based. Please ensure the file contains extractable text."
         )
     
     # Get user's history
@@ -99,49 +104,79 @@ async def check_file_in_history(
     async for record in cursor:
         history_records.append(record)
     
-    print(f"Checking against {len(history_records)} history records")
+    print(f"🔍 Checking against {len(history_records)} history records")
     
     matches = []
     highest_similarity = 0.0
     
-    # Compare against each history record
+    # Compare against each history record - CHECK BOTH TEXT1 AND TEXT2 SEPARATELY
     for record in history_records:
         text1 = record.get("text1", "")
         text2 = record.get("text2", "")
         
         if not text1 and not text2:
             continue
-            
-        similarity1 = calculate_text_similarity(text, text1) if text1 else 0
-        similarity2 = calculate_text_similarity(text, text2) if text2 else 0
         
-        max_similarity = max(similarity1, similarity2)
+        # Check against text1
+        if text1:
+            similarity1 = calculate_text_similarity(text, text1)
+            print(f"Record {record['_id']} - Text1 similarity: {similarity1:.2f}%")
+            
+            if similarity1 >= min_similarity:
+                file_name = record.get("file_name")
+                if not file_name or file_name == "[Google Only Check]":
+                    file_name = "Text Comparison"
+                
+                text1_name = record.get("text1_name", "Text 1")
+                text1_metadata = record.get("text1_metadata", {})
+                
+                matches.append(FileHistoryMatch(
+                    history_id=str(record["_id"]),
+                    similarity_score=round(similarity1, 2),
+                    timestamp=record["timestamp"],
+                    file_name=file_name,
+                    matched_text_preview=text1[:200] + "..." if len(text1) > 200 else text1,
+                    original_text1_preview=text1[:150] + "..." if len(text1) > 150 else text1,
+                    original_text2_preview=text2[:150] + "..." if len(text2) > 150 else text2,
+                    matched_with="text1",
+                    text_name=text1_name,
+                    text_metadata=text1_metadata
+                ))
+                
+                highest_similarity = max(highest_similarity, similarity1)
         
-        print(f"Record {record['_id']}: sim1={similarity1:.2f}%, sim2={similarity2:.2f}%")
-        
-        if max_similarity >= min_similarity:
-            matched_text = text1 if similarity1 > similarity2 else text2
+        # Check against text2 (if it's not a google-only check)
+        if text2 and text2 != "[Google Only Check]":
+            similarity2 = calculate_text_similarity(text, text2)
+            print(f"Record {record['_id']} - Text2 similarity: {similarity2:.2f}%")
             
-            file_name = record.get("file_name")
-            if not file_name or file_name == "[Google Only Check]":
-                file_name = "Text Comparison"
-            
-            matches.append(FileHistoryMatch(
-                history_id=str(record["_id"]),
-                similarity_score=round(max_similarity, 2),
-                timestamp=record["timestamp"],
-                file_name=file_name,
-                matched_text_preview=matched_text[:200] + "..." if len(matched_text) > 200 else matched_text,
-                original_text1_preview=text1[:150] + "..." if len(text1) > 150 else text1,
-                original_text2_preview=text2[:150] + "..." if len(text2) > 150 else text2
-            ))
-            
-            highest_similarity = max(highest_similarity, max_similarity)
+            if similarity2 >= min_similarity:
+                file_name = record.get("file_name")
+                if not file_name or file_name == "[Google Only Check]":
+                    file_name = "Text Comparison"
+                
+                text2_name = record.get("text2_name", "Text 2")
+                text2_metadata = record.get("text2_metadata", {})
+                
+                matches.append(FileHistoryMatch(
+                    history_id=str(record["_id"]),
+                    similarity_score=round(similarity2, 2),
+                    timestamp=record["timestamp"],
+                    file_name=file_name,
+                    matched_text_preview=text2[:200] + "..." if len(text2) > 200 else text2,
+                    original_text1_preview=text1[:150] + "..." if len(text1) > 150 else text1,
+                    original_text2_preview=text2[:150] + "..." if len(text2) > 150 else text2,
+                    matched_with="text2",
+                    text_name=text2_name,
+                    text_metadata=text2_metadata
+                ))
+                
+                highest_similarity = max(highest_similarity, similarity2)
     
     # Sort by similarity score (highest first)
     matches.sort(key=lambda x: x.similarity_score, reverse=True)
     
-    print(f"Found {len(matches)} matches, highest: {highest_similarity:.2f}%")
+    print(f"✅ Found {len(matches)} matches, highest: {highest_similarity:.2f}%")
     
     return FileHistorySearchResponse(
         matches_found=len(matches),
