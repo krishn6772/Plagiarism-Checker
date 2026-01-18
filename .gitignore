@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyd
 .Python
 
 # Virtual Environments
@@ -19,6 +20,11 @@ ENV/
 models/
 checkpoints/
 
+# Node / Frontend
+node_modules/
+build/
+dist/
+
 # IDEs
 .vscode/
 .idea/
@@ -30,3 +36,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Databases
+*.db
+*.sqlite3
