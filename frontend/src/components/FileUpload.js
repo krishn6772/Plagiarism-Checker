@@ -1,7 +1,21 @@
 import React, { useState } from 'react';
 import { uploadFiles, checkFileHistory } from '../api/api';
 import HistoryMatches from './HistoryMatches';
+import GoogleSimilarityViewer from './GoogleSimilarityViewer';
 import './FileUpload.css';
+
+// Helper function to extract text from file
+const extractTextFromFile = async (file) => {
+  if (file.type === 'text/plain') {
+    return await file.text();
+  } else if (file.type === 'application/pdf' || 
+             file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    // For PDF and DOCX, we'll indicate that full comparison isn't available in frontend
+    // The backend handles the actual text extraction
+    return `[${file.name} - Binary file content. Similarity comparison handled by server.]`;
+  }
+  return '';
+};
 
 function FileUpload({ onResult }) {
   const [file1, setFile1] = useState(null);
@@ -12,9 +26,13 @@ function FileUpload({ onResult }) {
   const [loading, setLoading] = useState(false);
   const [dragActive1, setDragActive1] = useState(false);
   const [dragActive2, setDragActive2] = useState(false);
-  const [historyMatches, setHistoryMatches] = useState(null);
-  const [showHistoryMatches, setShowHistoryMatches] = useState(false);
+  const [historyMatches1, setHistoryMatches1] = useState(null);
+  const [historyMatches2, setHistoryMatches2] = useState(null);
+  const [showHistoryMatches1, setShowHistoryMatches1] = useState(false);
+  const [showHistoryMatches2, setShowHistoryMatches2] = useState(false);
   const [checkingHistory, setCheckingHistory] = useState(false);
+  const [extractedText1, setExtractedText1] = useState('');
+  const [extractedText2, setExtractedText2] = useState('');
 
   const handleFile1Change = (e) => {
     const file = e.target.files[0];
@@ -78,33 +96,27 @@ function FileUpload({ onResult }) {
     }
   };
 
-  // Check ANY file type against history using backend API
-  const checkFileAgainstHistory = async (file) => {
+  // Check file against history with detailed response
+  const checkFileAgainstHistory = async (file, fileNumber) => {
     if (!checkHistory) {
       console.log('History check disabled');
-      return false;
+      return { found: false, matches: null };
     }
 
-    console.log(`🔍 Checking ${file.name} against history...`);
-    setCheckingHistory(true);
+    console.log(`🔍 Checking File ${fileNumber} (${file.name}) against history...`);
 
     try {
-      // Create FormData with the file
       const formData = new FormData();
       formData.append('file', file);
       formData.append('min_similarity', '50.0');
 
-      console.log('Sending file to backend for history check...');
-
-      // Call backend API
       const response = await checkFileHistory(formData);
-
-      console.log('History check response:', response.data);
+      console.log(`File ${fileNumber} history check response:`, response.data);
 
       if (response.data.matches_found > 0) {
-        console.log(`✅ Found ${response.data.matches_found} matches!`);
+        console.log(`✅ File ${fileNumber}: Found ${response.data.matches_found} matches!`);
         
-        // Transform the response to match HistoryMatches component format
+        // Transform the response
         const transformedMatches = {
           matches_found: response.data.matches_found,
           highest_similarity: response.data.highest_similarity,
@@ -116,38 +128,22 @@ function FileUpload({ onResult }) {
             matched_text: match.matched_text_preview,
             original_text1: match.original_text1_preview,
             original_text2: match.original_text2_preview,
-            file_name: match.file_name
+            file_name: match.file_name,
+            matched_with: match.matched_with,
+            text_name: match.text_name,
+            text_metadata: match.text_metadata
           }))
         };
 
-        setHistoryMatches(transformedMatches);
-        setShowHistoryMatches(true);
-        
-        alert(
-          `⚠️ SIMILARITY DETECTED!\n\n` +
-          `File: ${file.name}\n` +
-          `Matches Found: ${response.data.matches_found}\n` +
-          `Highest Similarity: ${response.data.highest_similarity}%\n\n` +
-          `View details in the popup to see matching submissions.`
-        );
-        
-        return true;
+        return { found: true, matches: transformedMatches };
       } else {
-        console.log('✅ No matches found - new content');
-        alert(
-          `✅ No Similar Content Found\n\n` +
-          `File: ${file.name}\n` +
-          `This appears to be new content not previously submitted.`
-        );
+        console.log(`✅ File ${fileNumber}: No matches found - new content`);
+        return { found: false, matches: null };
       }
-
-      return false;
     } catch (error) {
-      console.error('❌ History check error:', error);
-      alert(`Error checking history:\n${error.response?.data?.detail || error.message}`);
-      return false;
-    } finally {
-      setCheckingHistory(false);
+      console.error(`❌ File ${fileNumber} history check error:`, error);
+      alert(`Error checking File ${fileNumber} history:\n${error.response?.data?.detail || error.message}`);
+      return { found: false, matches: null };
     }
   };
 
@@ -161,14 +157,84 @@ function FileUpload({ onResult }) {
     console.log(`File 1: ${file1.name} (${file1.type})`);
     console.log(`File 2: ${file2.name} (${file2.type})`);
 
-    setHistoryMatches(null);
-    setShowHistoryMatches(false);
+    setHistoryMatches1(null);
+    setHistoryMatches2(null);
+    setShowHistoryMatches1(false);
+    setShowHistoryMatches2(false);
 
     try {
-      // STEP 1: Check file1 against history
+      // First, extract text from both files for later comparison view
+      const text1 = await extractTextFromFile(file1);
+      const text2 = await extractTextFromFile(file2);
+
+      setExtractedText1(text1);
+      setExtractedText2(text2);
+
+      // STEP 1: Check BOTH files against history SEPARATELY
       if (checkHistory) {
-        console.log('STEP 1: Checking file against history...');
-        await checkFileAgainstHistory(file1);
+        console.log('STEP 1: Checking BOTH files separately against history...');
+        setCheckingHistory(true);
+
+        // Check both files in parallel
+        const [result1, result2] = await Promise.all([
+          checkFileAgainstHistory(file1, 1),
+          checkFileAgainstHistory(file2, 2)
+        ]);
+
+        setCheckingHistory(false);
+
+        // Store matches if found
+        if (result1.found) {
+          setHistoryMatches1(result1.matches);
+        }
+        if (result2.found) {
+          setHistoryMatches2(result2.matches);
+        }
+
+        // Show combined alert for both files
+        if (result1.found && result2.found) {
+          alert(
+            `⚠️ WARNING: BOTH FILES FOUND IN HISTORY!\n\n` +
+            `📄 File 1: ${file1.name}\n` +
+            `  • ${result1.matches.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${result1.matches.highest_similarity}%\n\n` +
+            `📄 File 2: ${file2.name}\n` +
+            `  • ${result2.matches.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${result2.matches.highest_similarity}%\n\n` +
+            `Click OK to proceed and view detailed matches.`
+          );
+          setShowHistoryMatches1(true);
+          setShowHistoryMatches2(true);
+        } else if (result1.found) {
+          alert(
+            `⚠️ WARNING: File 1 Found in History!\n\n` +
+            `📄 File 1: ${file1.name}\n` +
+            `  • ${result1.matches.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${result1.matches.highest_similarity}%\n\n` +
+            `📄 File 2: ${file2.name}\n` +
+            `  • No matches found ✅\n\n` +
+            `Click OK to proceed and view File 1 matches.`
+          );
+          setShowHistoryMatches1(true);
+        } else if (result2.found) {
+          alert(
+            `⚠️ WARNING: File 2 Found in History!\n\n` +
+            `📄 File 1: ${file1.name}\n` +
+            `  • No matches found ✅\n\n` +
+            `📄 File 2: ${file2.name}\n` +
+            `  • ${result2.matches.matches_found} match(es) found\n` +
+            `  • Highest similarity: ${result2.matches.highest_similarity}%\n\n` +
+            `Click OK to proceed and view File 2 matches.`
+          );
+          setShowHistoryMatches2(true);
+        } else {
+          alert(
+            `✅ NO SIMILAR CONTENT FOUND\n\n` +
+            `📄 File 1: ${file1.name} - New content ✅\n` +
+            `📄 File 2: ${file2.name} - New content ✅\n\n` +
+            `Both files appear to be new submissions.`
+          );
+        }
       }
 
       // STEP 2: Upload and compare files
@@ -210,6 +276,7 @@ function FileUpload({ onResult }) {
       alert(`❌ Error:\n${error.response?.data?.detail || error.message}`);
     } finally {
       setLoading(false);
+      setCheckingHistory(false);
       console.log('=== UPLOAD COMPLETE ===');
     }
   };
@@ -240,12 +307,14 @@ function FileUpload({ onResult }) {
 
       {checkHistory && (
         <div className="history-check-info">
-          <p>📋 <strong>History Check Enabled:</strong></p>
+          <p>📋 <strong>History Check Enabled - Separate File Checking:</strong></p>
           <ul>
-            <li>✅ ALL file types (TXT, PDF, DOCX) are checked against your history</li>
-            <li>⚡ Files are checked BEFORE comparison</li>
-            <li>🔔 You'll be alerted if similar content is found</li>
-            <li>💾 All files are stored in history for future checks</li>
+            <li>✅ <strong>File 1</strong> is checked SEPARATELY against your entire history</li>
+            <li>✅ <strong>File 2</strong> is checked SEPARATELY against your entire history</li>
+            <li>🔍 Both files are compared independently for maximum accuracy</li>
+            <li>⚡ Files are checked BEFORE comparison to detect resubmissions</li>
+            <li>🔔 You'll be alerted separately if either or both files were submitted before</li>
+            <li>💾 All files are stored with detailed metadata for future checks</li>
           </ul>
         </div>
       )}
@@ -357,7 +426,7 @@ function FileUpload({ onResult }) {
             checked={checkHistory}
             onChange={(e) => setCheckHistory(e.target.checked)}
           />
-          Check Against Past History
+          Check Against Past History (Both Files Separately)
         </label>
       </div>
 
@@ -369,7 +438,7 @@ function FileUpload({ onResult }) {
         {checkingHistory ? (
           <>
             <span className="spinner-small"></span>
-            Checking History...
+            Checking Files Separately...
           </>
         ) : loading ? (
           <>
@@ -381,11 +450,23 @@ function FileUpload({ onResult }) {
         )}
       </button>
 
-      {/* History Matches Modal */}
-      {showHistoryMatches && historyMatches && (
+      {/* History Matches Modal for File 1 */}
+      {showHistoryMatches1 && historyMatches1 && (
         <HistoryMatches
-          matches={historyMatches}
-          onClose={() => setShowHistoryMatches(false)}
+          matches={historyMatches1}
+          onClose={() => setShowHistoryMatches1(false)}
+          title={`📄 File 1 (${file1?.name}) - History Matches`}
+          currentText={extractedText1}
+        />
+      )}
+
+      {/* History Matches Modal for File 2 */}
+      {showHistoryMatches2 && historyMatches2 && (
+        <HistoryMatches
+          matches={historyMatches2}
+          onClose={() => setShowHistoryMatches2(false)}
+          title={`📄 File 2 (${file2?.name}) - History Matches`}
+          currentText={extractedText2}
         />
       )}
     </div>

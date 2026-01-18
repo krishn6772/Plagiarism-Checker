@@ -6,6 +6,7 @@ import HistoryMatches from '../components/HistoryMatches';
 import GoogleSources from '../components/GoogleSources';
 import GoogleOnlyCheck from '../components/GoogleOnlyCheck';
 import AIDetectionResult from '../components/AIDetectionResult';
+import GoogleSimilarityViewer from '../components/GoogleSimilarityViewer';
 import './Dashboard.css';
 
 function UserDashboard({ user, onLogout }) {
@@ -13,16 +14,19 @@ function UserDashboard({ user, onLogout }) {
   const [text2, setText2] = useState('');
   const [checkGoogle, setCheckGoogle] = useState(false);
   const [checkAI, setCheckAI] = useState(false);
-  const [checkHistory, setCheckHistory] = useState(true); // Enable by default
+  const [checkHistory, setCheckHistory] = useState(true);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [activeTab, setActiveTab] = useState('check');
   const [highlightedText1, setHighlightedText1] = useState('');
   const [highlightedText2, setHighlightedText2] = useState('');
-  const [historyMatches, setHistoryMatches] = useState(null);
-  const [showHistoryMatches, setShowHistoryMatches] = useState(false);
+  const [historyMatches1, setHistoryMatches1] = useState(null);
+  const [historyMatches2, setHistoryMatches2] = useState(null);
+  const [showHistoryMatches1, setShowHistoryMatches1] = useState(false);
+  const [showHistoryMatches2, setShowHistoryMatches2] = useState(false);
   const [checkingHistory, setCheckingHistory] = useState(false);
+  const [showGoogleViewer, setShowGoogleViewer] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -90,12 +94,14 @@ function UserDashboard({ user, onLogout }) {
     }).join('');
   };
 
-  const checkAgainstHistory = async (text) => {
-    if (!checkHistory) {
-      return false; // Skip if history check is disabled
+  // Check Text 1 against history
+  const checkText1AgainstHistory = async (text) => {
+    if (!checkHistory || !text || text.trim().length < 50) {
+      return false;
     }
 
-    setCheckingHistory(true);
+    console.log('🔍 Checking Text 1 against history...');
+
     try {
       const response = await searchInHistory({
         text: text,
@@ -103,16 +109,40 @@ function UserDashboard({ user, onLogout }) {
       });
 
       if (response.data.matches_found > 0) {
-        setHistoryMatches(response.data);
-        setShowHistoryMatches(true);
+        console.log(`✅ Text 1: Found ${response.data.matches_found} matches`);
+        setHistoryMatches1(response.data);
         return true;
       }
       return false;
     } catch (error) {
-      console.error('Error checking history:', error);
+      console.error('Error checking Text 1 history:', error);
       return false;
-    } finally {
-      setCheckingHistory(false);
+    }
+  };
+
+  // Check Text 2 against history
+  const checkText2AgainstHistory = async (text) => {
+    if (!checkHistory || !text || text.trim().length < 50) {
+      return false;
+    }
+
+    console.log('🔍 Checking Text 2 against history...');
+
+    try {
+      const response = await searchInHistory({
+        text: text,
+        min_similarity: 50.0
+      });
+
+      if (response.data.matches_found > 0) {
+        console.log(`✅ Text 2: Found ${response.data.matches_found} matches`);
+        setHistoryMatches2(response.data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking Text 2 history:', error);
+      return false;
     }
   };
 
@@ -126,16 +156,75 @@ function UserDashboard({ user, onLogout }) {
     setResult(null);
     setHighlightedText1('');
     setHighlightedText2('');
-    setHistoryMatches(null);
-    setShowHistoryMatches(false);
+    setHistoryMatches1(null);
+    setHistoryMatches2(null);
+    setShowHistoryMatches1(false);
+    setShowHistoryMatches2(false);
 
     try {
-      // Check text1 against history BEFORE the plagiarism check
+      // Check both texts against history SEPARATELY
       if (checkHistory) {
-        await checkAgainstHistory(text1);
+        setCheckingHistory(true);
+        console.log('=== Checking History for Both Texts Separately ===');
+
+        const [match1Found, match2Found] = await Promise.all([
+          checkText1AgainstHistory(text1),
+          checkText2AgainstHistory(text2)
+        ]);
+
+        setCheckingHistory(false);
+
+        // Show detailed results for both checks
+        if (match1Found && match2Found) {
+          const text1Matches = historyMatches1?.matches_found || 0;
+          const text2Matches = historyMatches2?.matches_found || 0;
+          const text1Similarity = historyMatches1?.highest_similarity || 0;
+          const text2Similarity = historyMatches2?.highest_similarity || 0;
+          
+          alert(
+            `⚠️ WARNING: BOTH TEXTS FOUND IN YOUR HISTORY!\n\n` +
+            `📝 Text 1:\n` +
+            `  • ${text1Matches} match(es) found\n` +
+            `  • Highest similarity: ${text1Similarity}%\n\n` +
+            `📝 Text 2:\n` +
+            `  • ${text2Matches} match(es) found\n` +
+            `  • Highest similarity: ${text2Similarity}%\n\n` +
+            `Click OK to view detailed matches for both texts.`
+          );
+          setShowHistoryMatches1(true);
+          setShowHistoryMatches2(true);
+        } else if (match1Found) {
+          const text1Matches = historyMatches1?.matches_found || 0;
+          const text1Similarity = historyMatches1?.highest_similarity || 0;
+          
+          alert(
+            `⚠️ WARNING: Text 1 Found in Your History!\n\n` +
+            `📝 Text 1 Details:\n` +
+            `  • ${text1Matches} match(es) found\n` +
+            `  • Highest similarity: ${text1Similarity}%\n\n` +
+            `Text 2: No matches found ✅\n\n` +
+            `Click OK to view Text 1 matches.`
+          );
+          setShowHistoryMatches1(true);
+        } else if (match2Found) {
+          const text2Matches = historyMatches2?.matches_found || 0;
+          const text2Similarity = historyMatches2?.highest_similarity || 0;
+          
+          alert(
+            `⚠️ WARNING: Text 2 Found in Your History!\n\n` +
+            `Text 1: No matches found ✅\n\n` +
+            `📝 Text 2 Details:\n` +
+            `  • ${text2Matches} match(es) found\n` +
+            `  • Highest similarity: ${text2Similarity}%\n\n` +
+            `Click OK to view Text 2 matches.`
+          );
+          setShowHistoryMatches2(true);
+        } else {
+          console.log('✅ No matches found for either text - new content');
+        }
       }
 
-      // Then perform normal plagiarism check
+      // Perform normal plagiarism check
       const response = await checkPlagiarism({
         text1,
         text2,
@@ -154,6 +243,7 @@ function UserDashboard({ user, onLogout }) {
       alert('Error checking plagiarism: ' + (error.response?.data?.detail || error.message));
     } finally {
       setLoading(false);
+      setCheckingHistory(false);
     }
   };
 
@@ -231,6 +321,19 @@ function UserDashboard({ user, onLogout }) {
           <div className="tab-content">
             <h2>Compare Two Texts</h2>
 
+            {checkHistory && (
+              <div className="history-check-info">
+                <p>📋 <strong>History Check Enabled - Separate Checking:</strong></p>
+                <ul>
+                  <li>✅ <strong>Text 1</strong> is checked SEPARATELY against all past submissions</li>
+                  <li>✅ <strong>Text 2</strong> is checked SEPARATELY against all past submissions</li>
+                  <li>🔍 Both texts are compared independently for maximum accuracy</li>
+                  <li>📊 You'll see detailed results for each text individually</li>
+                  <li>🔔 Separate alerts will show if either or both texts were previously submitted</li>
+                </ul>
+              </div>
+            )}
+
             {!result ? (
               <div className="text-comparison">
                 <div className="text-input-container">
@@ -294,13 +397,25 @@ function UserDashboard({ user, onLogout }) {
                   checked={checkHistory}
                   onChange={(e) => setCheckHistory(e.target.checked)}
                 />
-                Check Against Past History
+                Check Against Past History (Both Texts Separately)
               </label>
             </div>
 
             <div className="button-group">
               <button onClick={handleCheck} className="btn-primary" disabled={loading || checkingHistory}>
-                {checkingHistory ? 'Checking History...' : loading ? 'Checking...' : 'Check Plagiarism'}
+                {checkingHistory ? (
+                  <>
+                    <span className="spinner-small"></span>
+                    Checking History Separately...
+                  </>
+                ) : loading ? (
+                  <>
+                    <span className="spinner-small"></span>
+                    Checking...
+                  </>
+                ) : (
+                  'Check Plagiarism'
+                )}
               </button>
               {result && (
                 <button
@@ -308,8 +423,10 @@ function UserDashboard({ user, onLogout }) {
                     setResult(null);
                     setHighlightedText1('');
                     setHighlightedText2('');
-                    setHistoryMatches(null);
-                    setShowHistoryMatches(false);
+                    setHistoryMatches1(null);
+                    setHistoryMatches2(null);
+                    setShowHistoryMatches1(false);
+                    setShowHistoryMatches2(false);
                   }}
                   className="btn-secondary"
                 >
@@ -347,33 +464,30 @@ function UserDashboard({ user, onLogout }) {
                   </div>
                   <div className="highlight-legend">
                     <p>
-                      <mark className="highlight-match">Yellow highlight</mark> shows matching text between inputs |
+                      <mark className="highlight-match">Yellow highlight</mark> shows matching text between inputs | 
                       <mark className="google-match">Green highlight</mark> shows text found on Google |
                       <mark className="ai-pattern">Pink highlight</mark> shows AI patterns
                     </p>
                   </div>
                 </div>
-
-                {/* Display AI Detection Results */}
+                
                 {result.ai_detection && (
                   <AIDetectionResult aiResult={result.ai_detection} />
                 )}
-
-                {/* Display Google Highlighted Text */}
+                
                 {result.google_highlighted_text && result.google_similarity > 0 && (
                   <div className="google-highlighted-section">
                     <h4>🌐 Your Text with Google Matches Highlighted:</h4>
-                    <div
+                    <div 
                       className="google-highlighted-text"
                       dangerouslySetInnerHTML={{ __html: result.google_highlighted_text }}
                     />
                   </div>
                 )}
-
-                {/* Display Google Sources */}
+                
                 {result.google_sources && result.google_sources.length > 0 && (
-                  <GoogleSources
-                    sources={result.google_sources}
+                  <GoogleSources 
+                    sources={result.google_sources} 
                     similarity={result.google_similarity}
                     allMatches={result.all_google_matches}
                   />
@@ -385,7 +499,7 @@ function UserDashboard({ user, onLogout }) {
 
         {activeTab === 'google' && (
           <div className="tab-content">
-            <GoogleOnlyCheck
+            <GoogleOnlyCheck 
               onResult={setResult}
               getSimilarityColor={getSimilarityColor}
             />
@@ -422,38 +536,25 @@ function UserDashboard({ user, onLogout }) {
                   <div className="result-message">
                     <strong>{result.message}</strong>
                   </div>
-                  <div className="highlight-legend">
-                    <p>
-                      <mark className="highlight-match">Yellow highlight</mark> = matching text between inputs |
-                      <mark className="google-match">Green highlight</mark> = text found on Google |
-                      <mark className="ai-pattern">Pink highlight</mark> = AI patterns
-                    </p>
-                  </div>
                 </div>
-
-                {/* Display AI Detection Results */}
+                
                 {result.ai_detection && (
                   <AIDetectionResult aiResult={result.ai_detection} />
                 )}
-
-                {/* Display Google Highlighted Text - UPDATED */}
+                
                 {result.google_highlighted_text && result.google_similarity > 0 && (
                   <div className="google-highlighted-section">
                     <h4>🌐 Your Text with Google Matches Highlighted:</h4>
-                    <p style={{ marginBottom: '15px', color: '#2e7d32', fontSize: '14px' }}>
-                      <strong>Found {result.all_google_matches?.length || 0} matching segments</strong> from Google sources
-                    </p>
-                    <div
+                    <div 
                       className="google-highlighted-text"
                       dangerouslySetInnerHTML={{ __html: result.google_highlighted_text }}
                     />
                   </div>
                 )}
-
-                {/* Display Google Sources */}
+                
                 {result.google_sources && result.google_sources.length > 0 && (
-                  <GoogleSources
-                    sources={result.google_sources}
+                  <GoogleSources 
+                    sources={result.google_sources} 
                     similarity={result.google_similarity}
                     allMatches={result.all_google_matches}
                   />
@@ -478,11 +579,35 @@ function UserDashboard({ user, onLogout }) {
         )}
       </div>
 
-      {/* History Matches Modal - Shows when similar content found in history */}
-      {showHistoryMatches && historyMatches && (
+      {/* History Matches Modal for Text 1 */}
+      {showHistoryMatches1 && historyMatches1 && (
         <HistoryMatches
-          matches={historyMatches}
-          onClose={() => setShowHistoryMatches(false)}
+          matches={historyMatches1}
+          onClose={() => setShowHistoryMatches1(false)}
+          title="📝 Text 1 - History Matches"
+          currentText={text1}
+        />
+      )}
+
+      {/* History Matches Modal for Text 2 */}
+      {showHistoryMatches2 && historyMatches2 && (
+        <HistoryMatches
+          matches={historyMatches2}
+          onClose={() => setShowHistoryMatches2(false)}
+          title="📝 Text 2 - History Matches"
+          currentText={text2}
+        />
+      )}
+
+      {/* Google Similarity Viewer */}
+      {showGoogleViewer && result && result.google_sources && (
+        <GoogleSimilarityViewer
+          currentText={text1}
+          googleSources={result.google_sources}
+          googleHighlightedText={result.google_highlighted_text}
+          allGoogleMatches={result.all_google_matches}
+          similarity={result.google_similarity}
+          onClose={() => setShowGoogleViewer(false)}
         />
       )}
     </div>
